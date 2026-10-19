@@ -20,8 +20,8 @@ public final class CommandService implements AutoCloseable {
     private final ScheduledExecutorService worker;
     private volatile boolean closed; private boolean started; private boolean stopRequested;
     private static final class Command {
-        final String id, action, token; final long expires; RestartAdapter.Prepared restartTicket;
-        Command(String id,String action,String token,long expires) { this.id=id;this.action=action;this.token=token;this.expires=expires; }
+        final String id, action, token, targetSession; final long expires, executeBefore; RestartAdapter.Prepared restartTicket;
+        Command(String id,String action,String token,long expires,long executeBefore,String targetSession) { this.id=id;this.action=action;this.token=token;this.expires=expires;this.executeBefore=executeBefore;this.targetSession=targetSession; }
     }
     private static final class Result {
         final Command command; final boolean success; final String message;
@@ -59,7 +59,7 @@ public final class CommandService implements AutoCloseable {
             try { acknowledge(result.command,result.success,result.message); }
             catch(java.io.IOException error) {log.warning("Command acknowledgement pending; outcome retained in journal");}
         }
-        HttpRequest request=HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(config.timeoutSeconds)).GET().build();
+        HttpRequest request=HttpRequest.newBuilder(URI.create(endpoint+"?sessionId="+config.sessionId)).timeout(Duration.ofSeconds(config.timeoutSeconds)).GET().build();
         HttpResponse<byte[]> response=boundedSend(request, info -> new LimitedBody());
         String body=new String(response.body(),StandardCharsets.UTF_8);
         if(response.statusCode()!=200) throw new java.io.IOException("Command HTTP "+response.statusCode());
@@ -71,10 +71,13 @@ public final class CommandService implements AutoCloseable {
             if(!(item instanceof Map<?,?>)) throw new java.io.IOException("Invalid command");
             Map<?,?> values=(Map<?,?>)item;
             Command command=new Command(field(values,"id"),field(values,"action"),field(values,"leaseToken"),
-                    Instant.parse(field(values,"leaseExpiresAtUtc")).toEpochMilli());
+                    Instant.parse(field(values,"leaseExpiresAtUtc")).toEpochMilli(),
+                    values.get("expiresAtUtc")==null?Long.MAX_VALUE:Instant.parse(field(values,"expiresAtUtc")).toEpochMilli(),
+                    values.get("targetSessionId")==null?null:field(values,"targetSessionId"));
             if(!command.id.matches("[A-Za-z0-9_-]{1,128}") || !command.token.matches("[A-Za-z0-9_-]{1,128}"))
                 throw new java.io.IOException("Invalid command identity");
-            if(command.expires<=now.getAsLong() || inFlight.contains(command.id)) continue;
+            if(command.expires<=now.getAsLong() || command.executeBefore<=now.getAsLong() ||
+                (command.targetSession!=null && !command.targetSession.equals(config.sessionId)) || inFlight.contains(command.id)) continue;
             Properties previous=journal.read(command.id);
             if(previous!=null) {
                 boolean succeeded="done".equals(previous.getProperty("state")) && Boolean.parseBoolean(previous.getProperty("succeeded"));
@@ -112,6 +115,8 @@ public final class CommandService implements AutoCloseable {
         Result result;
         try {
             if(command.expires<=now.getAsLong()) throw new IllegalStateException("Lease expired before game tick");
+            if(command.executeBefore<=now.getAsLong()) throw new IllegalStateException("Command TTL expired before game tick");
+            if(command.targetSession!=null && !command.targetSession.equals(config.sessionId)) throw new IllegalStateException("Command belongs to another session");
             if(stopRequested) throw new IllegalStateException("Shutdown already requested");
             if(command.restartTicket!=null) command.restartTicket.validate();
             shutdown.requestStop(); stopRequested=true;
@@ -136,7 +141,7 @@ public final class CommandService implements AutoCloseable {
         if(command.expires<=now.getAsLong()) return;
         String text=message==null?"Unknown result":message;
         if(text.length()>1000) text=text.substring(0,1000);
-        String body="{\"leaseToken\":"+Heartbeat.quote(command.token)+",\"succeeded\":"+success+",\"result\":"+Heartbeat.quote(text)+"}";
+        String body="{\"leaseToken\":"+Heartbeat.quote(command.token)+",\"sessionId\":"+Heartbeat.quote(config.sessionId)+",\"succeeded\":"+success+",\"result\":"+Heartbeat.quote(text)+"}";
         HttpRequest request=HttpRequest.newBuilder(URI.create(endpoint+"/"+command.id+"/ack"))
             .timeout(Duration.ofSeconds(config.timeoutSeconds)).header("Content-Type","application/json; charset=utf-8")
             .POST(HttpRequest.BodyPublishers.ofString(body,StandardCharsets.UTF_8)).build();

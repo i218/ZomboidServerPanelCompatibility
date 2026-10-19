@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'io.serverpanelbridge'
-version = '0.3.2'
+version = '0.4.0'
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
 tasks.withType(JavaCompile).configureEach {
     options.release = 11
@@ -61,3 +61,11 @@ tasks.register('windowsRestartLauncher', Exec) {
     commandLine 'powershell.exe', '-NoProfile', '-File', file('windows/build.ps1'), '-Destination', launcherResources.get().file('windows/RestartLauncher.exe').asFile
 }
 tasks.named('processResources') { dependsOn 'windowsRestartLauncher' }
+
+tasks.register('panelCompatibilityTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.serverpanelbridge.PanelCompatibilityTests'
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+tasks.named('check') { dependsOn panelCompatibilityTest }

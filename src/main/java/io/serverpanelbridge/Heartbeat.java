@@ -12,9 +12,9 @@ public final class Heartbeat {
             ",\"memoryMb\":" + number(memory, Double.MAX_VALUE) +
             ",\"requestsPerMinute\":0,\"errorRatePercent\":0" +
             ",\"uptimeSeconds\":" + Math.max(0, uptime) +
-            ",\"version\":\"ServerPanelBridge 0.3.2\"" +
+            ",\"version\":\"ServerPanelBridge 0.4.0\"" +
             ",\"health\":" + quote(tickFresh ? "Healthy" : "Degraded") +
-            ",\"category\":" + quote(c.category) + "}";
+            ",\"category\":" + quote(c.category) + ",\"sessionId\":" + quote(c.sessionId) + "}";
     }
     static String number(double value, double max) {
         if (!Double.isFinite(value) || value < 0) value = 0;

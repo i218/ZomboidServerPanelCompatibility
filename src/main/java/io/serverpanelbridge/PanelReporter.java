@@ -15,7 +15,8 @@ public final class PanelReporter implements AutoCloseable {
     private final HttpClient http;
     private final ScheduledExecutorService worker;
     private volatile long lastTick;
-    private volatile boolean closed;
+    private volatile boolean closed, registered;
+    public boolean isRegistered() {return registered && !closed;}
     private boolean started;
     private int failures;
     public PanelReporter(BridgeConfig config, JvmMetrics metrics, LongSupplier clock, Logger log) {
@@ -46,6 +47,7 @@ public final class PanelReporter implements AutoCloseable {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt(); return;
         } catch (Exception failure) {
+            registered = false;
             failures = Math.min(30, failures + 1);
             delay = retrySeconds(config.heartbeatSeconds, config.maxRetrySeconds, failures);
             if (failures == 1 || failures % 12 == 0)
@@ -64,6 +66,7 @@ public final class PanelReporter implements AutoCloseable {
         HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
         if (response.statusCode() < 200 || response.statusCode() >= 300)
             throw new java.io.IOException("Panel returned HTTP " + response.statusCode());
+        registered = true;
     }
     static long retrySeconds(int interval, int maximum, int failures) {
         return Math.min(maximum, interval * (1L << Math.min(20, Math.max(0, failures - 1))));

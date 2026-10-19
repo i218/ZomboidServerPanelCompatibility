@@ -20,7 +20,7 @@ Online alone does not prove the game loop is responsive. A running reporter can 
 
 Networking runs on a daemon worker. Panel outages cannot block game ticks. Requests have a two-second timeout; retries back off to 30 seconds and recover automatically.
 
-This release implements **monitoring, opt-in graceful stop and restart**. Start still requires an external supervisor. Player counts and Workshop updates need additional fields in ServerPanel and are not sent as unrelated metrics.
+This release implements **monitoring, Output forwarding, session-aware commands, and opt-in graceful stop/restart**. Start still requires an external supervisor. Player counts and Workshop updates need additional fields in ServerPanel and are not sent as unrelated metrics.
 
 ## Install with one executable
 
@@ -74,10 +74,12 @@ The cache directory comes from the game, so a custom `-cachedir` is supported. L
 | requestTimeoutSeconds | 2 | Allowed: 1–5 |
 | staleTickSeconds | 20 | Allowed: 10–300 |
 | maxRetrySeconds | 30 | Maximum retry delay |
+| outputEnabled | true | Send bridge events to the panel Output tab |
+| captureConsoleOutput | false | Also tee Java stdout/stderr; may contain private data |
 
 A copy of the defaults is in [config/ServerPanelBridge.properties](config/ServerPanelBridge.properties). The runtime file is created automatically; the copy in the mod directory is a reference, not the active configuration.
 
-No player names, Steam IDs, IP addresses, credentials, or server INI contents are collected. Optional JVM overrides: `-Dserverpanelbridge.config=<absolute file>` and `-Dserverpanelbridge.cachedir=<absolute directory>`.
+With the default console capture disabled, reporting does not read player lists, chat, INI contents or other mods' log files. Console capture is opt-in and does not redact player data or secrets. Optional JVM overrides: `-Dserverpanelbridge.config=<absolute file>` and `-Dserverpanelbridge.cachedir=<absolute directory>`.
 
 ## Try it
 
@@ -220,3 +222,26 @@ Native regression test, using installed RakNet and Java with temporary ports and
 ```
 
 The same fixture reproduced retained ports with the 0.3.1 code and successfully rebound both ports in the replacement with 0.3.2. This validates native socket transfer and process relaunch, not a full production world startup. Windows builds embed the launcher using the built-in .NET Framework C# compiler; builds on other platforms use the existing direct Java helper path.
+
+## ServerPanel 1.12–1.13 compatibility (0.4.0)
+
+Each JVM creates one random sessionId and sends it in every heartbeat, command poll, ACK and output batch. It changes after a server restart and is never stored in configuration. Stop/Restart from a different targetSessionId are ignored before preparing a helper or reserving a command. Both expiresAtUtc and leaseExpiresAtUtc are checked before execution, including on the game tick. An action begun on time can still ACK after its command TTL, as long as its original lease is valid. Older command responses without the new optional fields retain the existing lease checks. Sessions prevent stale commands; they are not authentication.
+
+Open your host's **Output** tab to see new bridge events automatically after updating. For Java console output, add this to the active server-specific configuration and restart the server:
+
+```properties
+outputEnabled=true
+captureConsoleOutput=true
+```
+
+This tees System.out/System.err without changing their original bytes. It does not import existing files, chat history, native C/C++ console output or writes to streams cached before capture. Other mods may bypass or replace these streams; the bridge restores them on shutdown only if it still owns them. Some logging setups can produce duplicates. Console text may contain player addresses, chat or credentials and is stored by the panel in plain text/backups. Enable only if that is acceptable.
+
+Output has a separate daemon worker: up to 500 queued records, 100 per batch, 4000 UTF-16 characters per record. Oldest queued records are dropped when full. Incomplete console lines retain at most 16 KB until a newline or cleanup. Output waits for successful heartbeat registration and is best effort: rejected/timed-out batches are discarded without application-level replay, because the panel does not deduplicate. No startup backlog or shutdown flush is guaranteed; the panel retains only its latest 500 records. outputEnabled=false disables both sources. Existing runtime configs remain intact; missing new settings use the defaults above. Update the server's single EXE and fully restart it to activate the new JAR.
+
+The integration fixture can use an existing built ServerPanel assembly without launching the desktop app or touching its database:
+
+```powershell
+dotnet run --project tools/PanelApiSmoke/PanelApiSmoke.csproj -c Release -p:PanelAssembly="<ServerPanel.App.dll path>" -- "<java.exe path>" "<bridge project root>"
+```
+
+It uses a temporary loopback port, an in-memory registry, separate test JVM sessions and simulated game actions. Live Output/UI and multiplayer deployment remain checks on your actual server.

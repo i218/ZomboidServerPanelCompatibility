@@ -1,5 +1,5 @@
 name=ServerPanelBridge Menu Support
 id=ServerPanelBridgeMenu
 description=Optional local MLOS support for ServerPanelBridge. Enable on the administrator client only, never in the server INI.
-modversion=0.3.2
+modversion=0.4.0
 loadModAfter=\ModLoadOrderSorter_b42,\WorkshopSentinel

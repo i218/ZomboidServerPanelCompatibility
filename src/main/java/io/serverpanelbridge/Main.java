@@ -10,6 +10,7 @@ public final class Main {
     private static long lastOptionalCheck;
     private static PanelReporter reporter;
     private static CommandService commands;
+    private static OutputReporter output;
     private Main() { }
     public static synchronized void main(String[] args) {
         if (registered) return;
@@ -45,6 +46,11 @@ public final class Main {
                     reporter = new PanelReporter(config, new JvmMetrics(), () -> System.nanoTime() / 1_000_000, LOG);
                     Runtime.getRuntime().addShutdownHook(new Thread(reporter::close, "ServerPanelBridge-Cleanup"));
                     reporter.start();
+                    if(config.outputEnabled) {
+                        output=new OutputReporter(config,LOG,reporter::isRegistered);
+                        Runtime.getRuntime().addShutdownHook(new Thread(output::close,"ServerPanelBridge-OutputCleanup"));
+                        output.start();
+                    }
                     if(config.commandsEnabled) {
                         commands = new CommandService(config, file.getParent().resolve("commands"), new PzShutdownAdapter(config.stopWhenPlayersOnline), System::currentTimeMillis, LOG);
                         Runtime.getRuntime().addShutdownHook(new Thread(commands::close, "ServerPanelBridge-ControlCleanup"));
