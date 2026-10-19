@@ -1,9 +1,8 @@
 package io.serverpanelbridge;
 
-import java.io.*;
+import java.io.IOException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Path;
 import java.util.Properties;
 
 public final class BridgeConfig {
@@ -44,17 +43,7 @@ public final class BridgeConfig {
         heartbeatUri = URI.create(base.replaceAll("/$", "") + "/api/hosts/" + hostId + "/heartbeat");
     }
     public static BridgeConfig load(Path path, String serverName) throws IOException {
-        Properties values = new Properties();
-        if (Files.exists(path)) {
-            try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) { values.load(reader); }
-        } else {
-            Files.createDirectories(path.toAbsolutePath().getParent());
-            String defaults = "enabled=true\npanelUrl=http://127.0.0.1:5088\nhostId=\nhostName=\ncategory=Game servers\n" +
-                "environment=Production\naddress=Local dedicated server\nheartbeatSeconds=5\nrequestTimeoutSeconds=2\n" +
-                "staleTickSeconds=20\nmaxRetrySeconds=30\ncommandsEnabled=true\nstopEnabled=false\nstopWhenPlayersOnline=false\nrestartEnabled=false\nrestartExitTimeoutSeconds=180\noutputEnabled=true\ncaptureConsoleOutput=false\n";
-            Files.writeString(path, defaults, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-        }
-        return new BridgeConfig(values, serverName);
+        return ConfigFile.load(path,serverName);
     }
     private static boolean bool(Properties p, String key, boolean fallback) {
         String value = p.getProperty(key, Boolean.toString(fallback)).trim();

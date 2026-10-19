@@ -53,8 +53,8 @@ public final class BridgeTests {
                 Files.writeString(file, text, StandardCharsets.UTF_8);
                 BridgeConfig c = BridgeConfig.load(file, "test");
                 check(c.hostName.equals("Сервер Зомбоид") && !c.enabled, "UTF-8");
-                check(Files.readString(file).equals(text), "preserved");
-            } finally { Files.deleteIfExists(file); Files.deleteIfExists(file.getParent()); Files.deleteIfExists(dir); }
+                check(Files.readString(file).startsWith(text), "original bytes preserved before appended defaults");
+            } finally { try(var paths=Files.walk(dir)){for(Path path:paths.sorted(Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);} }
         });
         test("JSON encoding and finite locale-independent metrics", () -> {
             check(Heartbeat.quote("a\"\\\n\r\t\u0001").equals("\"a\\\"\\\\\\n\\r\\t\\u0001\""), "escaping");

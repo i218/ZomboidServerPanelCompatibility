@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'io.serverpanelbridge'
-version = '0.4.0'
+version = '0.4.1'
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
 tasks.withType(JavaCompile).configureEach {
     options.release = 11
@@ -69,3 +69,16 @@ tasks.register('panelCompatibilityTest', JavaExec) {
     jvmArgs '-Dfile.encoding=UTF-8'
 }
 tasks.named('check') { dependsOn panelCompatibilityTest }
+
+// One canonical schema for installer defaults and runtime migrations.
+tasks.named('processResources') {
+    from('config/ServerPanelBridge.properties') { into 'defaults' }
+}
+
+tasks.register('configMigrationTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.serverpanelbridge.ConfigMigrationTests'
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+tasks.named('check') { dependsOn configMigrationTest }

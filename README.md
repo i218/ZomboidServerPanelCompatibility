@@ -77,7 +77,7 @@ The cache directory comes from the game, so a custom `-cachedir` is supported. L
 | outputEnabled | true | Send bridge events to the panel Output tab |
 | captureConsoleOutput | false | Also tee Java stdout/stderr; may contain private data |
 
-A copy of the defaults is in [config/ServerPanelBridge.properties](config/ServerPanelBridge.properties). The runtime file is created automatically; the copy in the mod directory is a reference, not the active configuration.
+A copy of the defaults is in [config/ServerPanelBridge.properties](config/ServerPanelBridge.properties). The runtime file is created automatically; the copy in the mod directory is a reference, not the active configuration. On server startup, missing settings are added to the runtime file automatically, preserving your existing settings.
 
 With the default console capture disabled, reporting does not read player lists, chat, INI contents or other mods' log files. Console capture is opt-in and does not redact player data or secrets. Optional JVM overrides: `-Dserverpanelbridge.config=<absolute file>` and `-Dserverpanelbridge.cachedir=<absolute directory>`.
 
@@ -245,3 +245,11 @@ dotnet run --project tools/PanelApiSmoke/PanelApiSmoke.csproj -c Release -p:Pane
 ```
 
 It uses a temporary loopback port, an in-memory registry, separate test JVM sessions and simulated game actions. Live Output/UI and multiplayer deployment remain checks on your actual server.
+
+## Automatic configuration upgrades (0.4.1)
+
+After installing a new version, start the dedicated server normally. The bridge compares the active config with its bundled defaults and appends only missing keys. You no longer need to delete the old file to discover new options. Existing values, comments, custom keys, ordering, UTF-8/BOM and line endings are preserved; an existing key is never reset to a new default. A complete config is not written again and gets no new backup.
+
+Before an upgrade, an exact copy is saved beside the active file as `ServerPanelBridge.properties.backup-<unique>.bak`. The updated file is written to a temporary sibling and replaces the original atomically. If validation, backup or replacement fails, the original is retained and initialization reports an error. Invalid existing values are not silently corrected. Edit configs with the server stopped; a detected concurrent change aborts migration. Keep backups private: they contain your settings, and are not deleted automatically.
+
+New settings come from the same commented template bundled with the installer, so future additions are included in migration automatically. The installer still preserves an existing runtime config; additive migration happens at server startup, including when reporting is disabled. After migration, change the desired option and restart to apply it. Deleting an option makes it missing again and restores its default at the next startup; disable boolean settings explicitly with `false`.

@@ -28,3 +28,7 @@ secrets/
 Thumbs.db
 **/bin/
 **/obj/
+
+# Runtime config migration copies may contain private settings.
+*.properties.backup-*.bak
+*.properties.update-*.tmp

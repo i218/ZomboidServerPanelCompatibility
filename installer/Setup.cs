@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Windows.Forms;
 using System.Drawing;
-[assembly: AssemblyVersion("0.4.0.0")]
+[assembly: AssemblyVersion("0.4.1.0")]
 [assembly: AssemblyTitle("ServerPanelBridge Setup")]
 public class Setup {
     const string Id="ServerPanelBridge";
@@ -187,7 +187,7 @@ public class Setup {
         TextBox path=new TextBox(); ComboBox name=new ComboBox();
         CheckBox server=new CheckBox(), client=new CheckBox();
         public InstallForm() {
-            Text="ServerPanelBridge 0.4.0 — установка"; ClientSize=new Size(580,270); FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;
+            Text="ServerPanelBridge 0.4.1 — установка"; ClientSize=new Size(580,270); FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;
             var label=new Label { Text="Папка данных Zomboid (cachedir), не папка игры:",AutoSize=true,Location=new Point(15,15) }; Controls.Add(label);
             path.Text=DefaultDir; path.SetBounds(15,40,450,25); Controls.Add(path);
             var browse=new Button {Text="Обзор",Location=new Point(475,40)}; Controls.Add(browse);
