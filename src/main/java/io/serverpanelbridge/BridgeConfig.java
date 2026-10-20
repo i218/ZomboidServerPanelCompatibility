@@ -7,12 +7,20 @@ import java.util.Properties;
 
 public final class BridgeConfig {
     public final boolean enabled, commandsEnabled, stopEnabled, stopWhenPlayersOnline, restartEnabled, outputEnabled, captureConsoleOutput;
+    public final java.util.Set<String> restartRequesters;
     public final URI heartbeatUri;
     public final String hostId, hostName, category, environment, address;
     public final String sessionId=ClientSession.ID;
     public final int heartbeatSeconds, timeoutSeconds, staleTickSeconds, maxRetrySeconds, restartExitTimeoutSeconds;
 
     public BridgeConfig(Properties values, String serverName) {
+        java.util.Set<String> requesters=new java.util.LinkedHashSet<>();
+        for(String requester:values.getProperty("restartRequesters", "").split("[;,\\s]+")) {
+            if(requester.isEmpty()) continue;
+            if(!requester.matches("[A-Za-z0-9_.-]{1,80}")) throw new IllegalArgumentException("Invalid restartRequesters");
+            requesters.add(requester);
+        }
+        restartRequesters=java.util.Collections.unmodifiableSet(requesters);
         enabled = bool(values, "enabled", true);
         outputEnabled = bool(values, "outputEnabled", true);
         captureConsoleOutput = bool(values, "captureConsoleOutput", false);

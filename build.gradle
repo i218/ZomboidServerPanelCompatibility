@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'io.serverpanelbridge'
-version = '0.4.1'
+version = '0.5.0'
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
 tasks.withType(JavaCompile).configureEach {
     options.release = 11
@@ -82,3 +82,10 @@ tasks.register('configMigrationTest', JavaExec) {
     jvmArgs '-Dfile.encoding=UTF-8'
 }
 tasks.named('check') { dependsOn configMigrationTest }
+
+tasks.register('modRestartTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.serverpanelbridge.ModRestartTests'
+}
+tasks.named('check') { dependsOn modRestartTest }

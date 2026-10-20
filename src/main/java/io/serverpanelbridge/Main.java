@@ -9,7 +9,7 @@ public final class Main {
     private static boolean optionalChecked, optionalConfirmed, optionalFailureLogged;
     private static long lastOptionalCheck;
     private static PanelReporter reporter;
-    private static CommandService commands;
+    private static volatile CommandService commands;
     private static OutputReporter output;
     private Main() { }
     public static synchronized void main(String[] args) {
@@ -20,6 +20,15 @@ public final class Main {
             registered = true;
             LOG.info("Java bridge registered; awaiting dedicated-server tick");
         } catch (Exception error) { LOG.log(Level.SEVERE, "ZombieBuddy bridge registration failed", error); }
+    }
+    static String requestModRestart(String requester,String requestId) {
+        try {if(!PzRuntime.isDedicatedServer())return "REJECTED_NOT_SERVER";}
+        catch(ReflectiveOperationException unavailable){return "REJECTED_NOT_SERVER";}
+        CommandService active=commands;
+        return active==null?"REJECTED_UNAVAILABLE":active.requestModRestart(requester,requestId);
+    }
+    static String modRestartStatus(String requester,String requestId) {
+        CommandService active=commands;return active==null?"UNKNOWN":active.modRestartStatus(requester,requestId);
     }
     static synchronized boolean isClientOptionalReady() { return optionalConfirmed; }
     static synchronized void onTick() {
@@ -51,11 +60,11 @@ public final class Main {
                         Runtime.getRuntime().addShutdownHook(new Thread(output::close,"ServerPanelBridge-OutputCleanup"));
                         output.start();
                     }
-                    if(config.commandsEnabled) {
-                        commands = new CommandService(config, file.getParent().resolve("commands"), new PzShutdownAdapter(config.stopWhenPlayersOnline), System::currentTimeMillis, LOG);
-                        Runtime.getRuntime().addShutdownHook(new Thread(commands::close, "ServerPanelBridge-ControlCleanup"));
-                        commands.start();
-                    }
+                }
+                if((config.enabled && config.commandsEnabled) || !config.restartRequesters.isEmpty()) {
+                    commands = new CommandService(config, file.getParent().resolve("commands"), new PzShutdownAdapter(config.stopWhenPlayersOnline), System::currentTimeMillis, LOG);
+                    Runtime.getRuntime().addShutdownHook(new Thread(commands::close,"ServerPanelBridge-ControlCleanup"));
+                    commands.start();
                 }
                 LOG.info("Monitoring " + (config.enabled ? "enabled" : "disabled") + "; hostId=" + config.hostId + "; commandsEnabled=" + config.commandsEnabled + "; stopEnabled=" + config.stopEnabled + "; restartEnabled=" + config.restartEnabled);
             } catch (Exception error) { LOG.log(Level.SEVERE, "Monitoring initialization failed; retry requires server restart", error); }

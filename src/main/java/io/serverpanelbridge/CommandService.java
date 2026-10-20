@@ -18,10 +18,41 @@ public final class CommandService implements AutoCloseable {
     private final ConcurrentLinkedQueue<Result> completed=new ConcurrentLinkedQueue<>();
     private final Set<String> inFlight=new HashSet<>();
     private final ScheduledExecutorService worker;
-    private volatile boolean closed; private boolean started; private boolean stopRequested;
+    private volatile boolean closed; private volatile boolean started; private volatile boolean stopRequested;
     private static final class Command {
-        final String id, action, token, targetSession; final long expires, executeBefore; RestartAdapter.Prepared restartTicket;
+        boolean local; final String id, action, token, targetSession; final long expires, executeBefore; RestartAdapter.Prepared restartTicket;
         Command(String id,String action,String token,long expires,long executeBefore,String targetSession) { this.id=id;this.action=action;this.token=token;this.expires=expires;this.executeBefore=executeBefore;this.targetSession=targetSession; }
+    }
+    private final ConcurrentMap<String,String> localOutcomes=new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean localBusy=new java.util.concurrent.atomic.AtomicBoolean();
+    public String requestModRestart(String requester,String requestId) {
+        if(closed || !started) return "REJECTED_UNAVAILABLE";
+        if(!config.restartEnabled || !config.restartRequesters.contains(requester)) return "REJECTED_DISABLED";
+        if(requester==null || requestId==null || !requester.matches("[A-Za-z0-9_.-]{1,80}") || !requestId.matches("[A-Za-z0-9_-]{1,64}")) return "REJECTED_ID";
+        String key=requester+":"+requestId;
+        String previous=localOutcomes.get(key); if(previous!=null)return previous;
+        if(stopRequested || localOutcomes.size()>=128 || !localBusy.compareAndSet(false,true))return "REJECTED_BUSY";
+        if(localOutcomes.putIfAbsent(key,"QUEUED")!=null){localBusy.set(false);return localOutcomes.get(key);}
+        try {worker.execute(()->prepareModRestart(key));}
+        catch(RejectedExecutionException closed){localOutcomes.put(key,"FAILED_CLOSED");localBusy.set(false);}
+        return localOutcomes.get(key);
+    }
+    public String modRestartStatus(String requester,String requestId) {return localOutcomes.getOrDefault(requester+":"+requestId,"UNKNOWN");}
+    private void prepareModRestart(String key) {
+        Command command=new Command("mod-"+UUID.randomUUID(),"restart",key,now.getAsLong()+60000,now.getAsLong()+60000,config.sessionId);
+        command.local=true;
+        try {
+            if(closed || stopRequested)throw new IllegalStateException("Shutdown unavailable");
+            journal.write(command.id,"reserved",false,"Local mod restart reserved");
+            command.restartTicket=restart.prepare();
+            if(closed){command.restartTicket.close();throw new IllegalStateException("Bridge closed");}
+            pending.add(command);
+            log.info("Local mod restart queued: "+key);
+        } catch(Exception error) {
+            if(command.restartTicket!=null)command.restartTicket.close();
+            localOutcomes.put(key,"FAILED_PREPARATION");localBusy.set(false);
+            log.warning("Local mod restart preparation failed: "+error.getClass().getSimpleName()+"; server was not stopped");
+        }
     }
     private static final class Result {
         final Command command; final boolean success; final String message;
@@ -42,7 +73,7 @@ public final class CommandService implements AutoCloseable {
         worker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ServerPanelBridge-Control");t.setDaemon(true);return t;});
     }
     public synchronized void start() {
-        if(!started && !closed && config.commandsEnabled) {started=true;worker.scheduleWithFixedDelay(this::cycle,0,5,TimeUnit.SECONDS);}
+        if(!started && !closed) {started=true;if(config.enabled && config.commandsEnabled)worker.scheduleWithFixedDelay(this::cycle,0,5,TimeUnit.SECONDS);}
     }
     private void cycle() {
         try { pollOnce(); }
@@ -50,15 +81,8 @@ public final class CommandService implements AutoCloseable {
         catch(Exception error){log.warning("Command polling unavailable: "+error.getClass().getSimpleName());}
     }
     synchronized void pollOnce() throws Exception {
-        if(closed || !config.commandsEnabled) return;
-        Result result;
-        while((result=completed.poll())!=null) {
-            try { journal.write(result.command.id,"done",result.success,result.message); }
-            catch(java.io.IOException failure) { completed.add(result); throw failure; }
-            inFlight.remove(result.command.id);
-            try { acknowledge(result.command,result.success,result.message); }
-            catch(java.io.IOException error) {log.warning("Command acknowledgement pending; outcome retained in journal");}
-        }
+        if(closed || !config.enabled || !config.commandsEnabled) return;
+        flushCompleted();
         HttpRequest request=HttpRequest.newBuilder(URI.create(endpoint+"?sessionId="+config.sessionId)).timeout(Duration.ofSeconds(config.timeoutSeconds)).GET().build();
         HttpResponse<byte[]> response=boundedSend(request, info -> new LimitedBody());
         String body=new String(response.body(),StandardCharsets.UTF_8);
@@ -103,6 +127,32 @@ public final class CommandService implements AutoCloseable {
             inFlight.add(command.id); pending.add(command);
         }
     }
+    private boolean completionFailureLogged;
+    private void finishResults() {
+        if(closed)return;
+        try {flushCompleted();if(completionFailureLogged)log.info("Command result persistence recovered");completionFailureLogged=false;}
+        catch(Exception error) {
+            if(!completionFailureLogged)log.warning("Command result persistence failed; retrying without repeating shutdown: "+error.getClass().getSimpleName());
+            completionFailureLogged=true;
+            try {worker.schedule(this::finishResults,5,TimeUnit.SECONDS);}catch(RejectedExecutionException stopping){}
+        }
+    }
+    private synchronized void flushCompleted() throws Exception {
+        Result result;
+        while((result=completed.poll())!=null) {
+            try {journal.write(result.command.id,"done",result.success,result.message);}
+            catch(java.io.IOException failure){completed.add(result);throw failure;}
+            if(result.command.local) {
+                localOutcomes.put(result.command.token,result.success?"ARMED":"FAILED_EXECUTION");
+                localBusy.set(false);
+                log.info("Local mod restart outcome: "+(result.success?"ARMED (process startup not confirmed)":"FAILED_EXECUTION"));
+            } else {
+                inFlight.remove(result.command.id);
+                try {acknowledge(result.command,result.success,result.message);}
+                catch(java.io.IOException error){log.warning("Command acknowledgement pending; outcome retained in journal");}
+            }
+        }
+    }
     private static String field(Map<?,?> values,String name) throws java.io.IOException {
         Object value=values.get(name);
         if(!(value instanceof String) || ((String)value).length()>256) throw new java.io.IOException("Invalid "+name);
@@ -122,14 +172,14 @@ public final class CommandService implements AutoCloseable {
             shutdown.requestStop(); stopRequested=true;
             if(command.restartTicket!=null) command.restartTicket.arm();
             result=new Result(command,true,command.restartTicket==null ? "Graceful shutdown requested through QueueQuit; process exit and save completion are not confirmed" : "Restart armed after QueueQuit; replacement launch and save completion are not confirmed");
-            log.info("Graceful "+command.action+" requested by ServerPanel command "+command.id);
+            log.info("Graceful "+command.action+" requested by "+(command.local?"local mod":"ServerPanel command")+" "+command.id);
         } catch(Exception error) {
             result=new Result(command,false,"Shutdown/restart rejected: "+(error.getMessage()==null?error.getClass().getSimpleName():error.getMessage())+ (stopRequested ? "; shutdown was already queued; restart is not confirmed" : "; server was not stopped"));
             log.warning("Shutdown/restart rejected: "+error.getClass().getSimpleName());
         }
         if(command.restartTicket!=null) command.restartTicket.close();
         completed.add(result);
-        try {worker.execute(this::cycle);} catch(RejectedExecutionException stopping){}
+        try {worker.execute(this::finishResults);} catch(RejectedExecutionException stopping){}
     }
     private <T> HttpResponse<T> boundedSend(HttpRequest request,HttpResponse.BodyHandler<T> handler) throws Exception {
         CompletableFuture<HttpResponse<T>> future=http.sendAsync(request,handler);

@@ -1,7 +1,7 @@
 name=ServerPanelBridge
 id=ServerPanelBridge
 description=Dedicated-server monitoring for ServerPanel through ZombieBuddy. Optional graceful stop; no process kill.
-modversion=0.4.1
+modversion=0.5.0
 loadModAfter=\ZombieBuddy,\ModLoadOrderSorter_b42
 javaJarFile=media/java/ServerPanelBridge.jar
 javaPkgName=io.serverpanelbridge
