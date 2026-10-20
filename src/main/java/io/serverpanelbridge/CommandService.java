@@ -25,32 +25,44 @@ public final class CommandService implements AutoCloseable {
     }
     private final ConcurrentMap<String,String> localOutcomes=new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean localBusy=new java.util.concurrent.atomic.AtomicBoolean();
+    private final Object localRequestLock=new Object();
     public String requestModRestart(String requester,String requestId) {
-        if(closed || !started) return "REJECTED_UNAVAILABLE";
-        if(!config.restartEnabled || !config.restartRequesters.contains(requester)) return "REJECTED_DISABLED";
-        if(requester==null || requestId==null || !requester.matches("[A-Za-z0-9_.-]{1,80}") || !requestId.matches("[A-Za-z0-9_-]{1,64}")) return "REJECTED_ID";
-        String key=requester+":"+requestId;
-        String previous=localOutcomes.get(key); if(previous!=null)return previous;
-        if(stopRequested || localOutcomes.size()>=128 || !localBusy.compareAndSet(false,true))return "REJECTED_BUSY";
-        if(localOutcomes.putIfAbsent(key,"QUEUED")!=null){localBusy.set(false);return localOutcomes.get(key);}
-        try {worker.execute(()->prepareModRestart(key));}
-        catch(RejectedExecutionException closed){localOutcomes.put(key,"FAILED_CLOSED");localBusy.set(false);}
-        return localOutcomes.get(key);
+        // Never use the service/poll lock here: a caller may be on the game thread.
+        synchronized(localRequestLock) {
+            if(closed || !started) return "REJECTED_UNAVAILABLE";
+            if(!validModRequest(requester,requestId))return "REJECTED_ID";
+            if(!config.restartEnabled || !config.restartRequesters.contains(requester)) return "REJECTED_DISABLED";
+            String key=requester+":"+requestId;
+            String previous=localOutcomes.get(key);if(previous!=null)return previous;
+            if(stopRequested || localOutcomes.size()>=128 || !localBusy.compareAndSet(false,true))return "REJECTED_BUSY";
+            localOutcomes.put(key,"QUEUED");
+            long deadline=now.getAsLong()+60_000;
+            try {worker.execute(()->prepareModRestart(key,deadline));}
+            catch(RejectedExecutionException stopping){localOutcomes.put(key,"FAILED_CLOSED");localBusy.set(false);}
+            return localOutcomes.get(key);
+        }
     }
-    public String modRestartStatus(String requester,String requestId) {return localOutcomes.getOrDefault(requester+":"+requestId,"UNKNOWN");}
-    private void prepareModRestart(String key) {
-        Command command=new Command("mod-"+UUID.randomUUID(),"restart",key,now.getAsLong()+60000,now.getAsLong()+60000,config.sessionId);
+    private static boolean validModRequest(String requester,String requestId) {
+        return requester!=null && requestId!=null && requester.matches("[A-Za-z0-9_.-]{1,80}") && requestId.matches("[A-Za-z0-9_-]{1,64}");
+    }
+    public String modRestartStatus(String requester,String requestId) {
+        return validModRequest(requester,requestId)?localOutcomes.getOrDefault(requester+":"+requestId,"UNKNOWN"):"UNKNOWN";
+    }
+    private void prepareModRestart(String key,long deadline) {
+        Command command=new Command("mod-"+UUID.randomUUID(),"restart",key,deadline,deadline,config.sessionId);
         command.local=true;
         try {
-            if(closed || stopRequested)throw new IllegalStateException("Shutdown unavailable");
+            if(closed || stopRequested || now.getAsLong()>=deadline)throw new IllegalStateException("Shutdown unavailable or request expired");
             journal.write(command.id,"reserved",false,"Local mod restart reserved");
             command.restartTicket=restart.prepare();
-            if(closed){command.restartTicket.close();throw new IllegalStateException("Bridge closed");}
-            pending.add(command);
+            synchronized(localRequestLock) {
+                if(closed)throw new IllegalStateException("Bridge closed");
+                pending.add(command);
+            }
             log.info("Local mod restart queued: "+key);
         } catch(Exception error) {
             if(command.restartTicket!=null)command.restartTicket.close();
-            localOutcomes.put(key,"FAILED_PREPARATION");localBusy.set(false);
+            localOutcomes.put(key,closed?"FAILED_CLOSED":"FAILED_PREPARATION");localBusy.set(false);
             log.warning("Local mod restart preparation failed: "+error.getClass().getSimpleName()+"; server was not stopped");
         }
     }
@@ -198,5 +210,11 @@ public final class CommandService implements AutoCloseable {
         HttpResponse<Void> response=boundedSend(request,HttpResponse.BodyHandlers.discarding());
         if(response.statusCode()!=204) throw new java.io.IOException("Command acknowledgement HTTP "+response.statusCode());
     }
-    @Override public synchronized void close() {closed=true;worker.shutdownNow();Command command;while((command=pending.poll())!=null) if(command.restartTicket!=null) command.restartTicket.close();}
+    @Override public synchronized void close() {
+        closed=true;worker.shutdownNow();
+        synchronized(localRequestLock) {
+            Command command;while((command=pending.poll())!=null)if(command.restartTicket!=null)command.restartTicket.close();
+            localOutcomes.replaceAll((key,status)->status.equals("QUEUED")?"FAILED_CLOSED":status);localBusy.set(false);
+        }
+    }
 }

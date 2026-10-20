@@ -32,7 +32,7 @@ async Task RunJava(string main,params string[] more) {
 }
 await RunJava("io.serverpanelbridge.PanelSmoke");
 var host=registry.GetHost("pz-integration-test")??throw new InvalidOperationException("No registered host");
-if(host.Name!="Dedicated integration test" || host.Category!="Game servers" || host.Health!="Healthy" || host.Version!="ServerPanelBridge 0.4.1" || host.CpuPercent<0 || host.CpuPercent>100 || host.MemoryMb<=0 || host.SessionId is null)
+if(host.Name!="Dedicated integration test" || host.Category!="Game servers" || host.Health!="Healthy" || host.Version!="ServerPanelBridge 0.5.1" || host.CpuPercent<0 || host.CpuPercent>100 || host.MemoryMb<=0 || host.SessionId is null)
     throw new InvalidOperationException("Unexpected heartbeat values");
 var history=registry.GetCommandHistory(host.Id);
 if(history.Count!=3 || history.Single(c=>c.Action=="stop").Status!="Acknowledged" || history.Where(c=>c.Action!="stop").Any(c=>c.Status!="Failed"))throw new InvalidOperationException("Unexpected command outcomes");

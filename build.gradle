@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'io.serverpanelbridge'
-version = '0.5.0'
+version = '0.5.1'
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
 tasks.withType(JavaCompile).configureEach {
     options.release = 11
@@ -89,3 +89,10 @@ tasks.register('modRestartTest', JavaExec) {
     mainClass = 'io.serverpanelbridge.ModRestartTests'
 }
 tasks.named('check') { dependsOn modRestartTest }
+
+tasks.register('genericModApiTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.serverpanelbridge.GenericModApiTests'
+}
+tasks.named('check') { dependsOn genericModApiTest }
