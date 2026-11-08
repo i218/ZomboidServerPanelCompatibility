@@ -11,7 +11,7 @@ The server appears in ServerPanel under **Game servers**, with a heartbeat every
 | Metric | Meaning |
 | --- | --- |
 | Online | ServerPanel received a recent heartbeat |
-| Health | Healthy while server-loop callbacks continue, including empty-server pause; Degraded after 20 seconds without a callback |
+| Health | Starting before the first server callback; then Healthy while callbacks continue (including empty-server pause), Degraded after 20 seconds without one |
 | CPU | JVM process CPU, normalized across logical processors; first sample is zero |
 | Memory | Used JVM heap in MiB, not total process memory |
 | Uptime | JVM uptime |
@@ -198,7 +198,7 @@ Isolated process test (no real game server is started):
 
 restart-helper.log now records dated stages, the replacement PID, and its eventual exit code in decimal and hexadecimal. A process still alive after ten seconds is reported as running, not ready. The helper remains alongside the replacement only to observe exit; it does not retry or terminate it. Console output permissions are checked before shutdown, and cancellation/arming failures have explicit stage messages without launch arguments.
 
-If the console log stops during loading and the host never appears, distinguish an exited process from one still loading or stuck. The panel heartbeat starts after server-loop initialization. A log ending at LOADING ASSETS: START alone proves neither crash nor readiness. Preserve restart-helper.log, restart-console.log and the game's latest server DebugLog; for native crashes also inspect hs_err_pid*.log in the game's working directory. Do not launch a second server against the same save/ports until the replacement PID is checked.
+If the console log stops during loading and the host never appears, distinguish an exited process from one still loading or stuck. Since 0.6.0, heartbeat starts from the Java mod entry before server-loop initialization when the server identity is available; health remains Starting until a callback. A log ending at LOADING ASSETS: START alone proves neither crash nor readiness. Preserve restart-helper.log, restart-console.log and the game's latest server DebugLog; for native crashes also inspect hs_err_pid*.log in the game's working directory. Do not launch a second server against the same save/ports until the replacement PID is checked.
 After the original process exits, the helper checks the effective GameServer.defaultPort and GameServer.udpPort with exclusive UDP wildcard bind probes. It waits up to 30 seconds for release and cancels launch if either cannot be bound. On Windows, occupied-port diagnostics include ownerPid when Get-NetUDPEndpoint is available. The helper never stops that owner or changes ports. Unknown/invalid game port fields refuse preparation before shutdown. The check is conservative and does not reserve ports: another launcher can still claim them during game loading. Use a single restart owner.
 
 Connection Startup Failed. Code: 5 corresponds to SOCKET_PORT_ALREADY_IN_USE in [RakNet's startup result enum](https://github.com/facebookarchive/RakNet/blob/master/Source/RakNetTypes.h). Check ownerPid in restart-helper.log on the dedicated machine. A cancelled restart leaves the old server stopped; resolve the port conflict before starting it again.
@@ -265,3 +265,13 @@ Local integration is independent from panel reporting/polling: `enabled=false` a
 ## Shared mod contract (0.5.1)
 
 Other server mods use the same versioned [Local restart API v1](docs/MOD_RESTART_API.md), via Java reflection or the ZombieBuddy Lua global. There is no plugin-specific production route or required Sentinel dependency. Multiple exact requester names can be authorized; every request retains Bridge's existing player policy, common shutdown gate, helper, and journal. Concurrent duplicates reuse one outcome. Local requests expire 60 seconds after acceptance, and closure publishes a terminal status rather than leaving queued requests pending forever. The existing Sentinel Java adapter stays compatible with v1.
+
+## Earlier startup output (0.6.0)
+
+Heartbeat and Output initialization now begin on a dedicated background worker from ZombieBuddy's Java mod main entry, instead of waiting for OnServerStarted or the first tick. The worker waits for the verified server flag, actual server name and game cachedir; it never guesses a profile or reads command-line credentials. It installs capture before starting the first heartbeat. Output queues while registration is pending and sends in parallel with subsequent game loading. Repeated main/callback calls reuse the same reporter and capture. Existing defaults and your config values are preserved.
+
+Before the first server callback, health is Starting. After the callback, normal Healthy/Degraded tick checks apply. Panel commands and local mod restarts are initialized only from game callbacks, so an early heartbeat does not make Stop/Restart available during loading. Lua exposure failure can leave early reporting working with Starting health while controls remain unavailable. Optional-client exclusion stays on the normal server callbacks.
+
+To see Java console text during loading, keep outputEnabled=true and explicitly set captureConsoleOutput=true in the active runtime config, then fully restart. With console capture disabled, only Bridge events are sent earlier. Existing privacy, queue, truncation and best-effort delivery limits still apply: this does not import old files or capture writes through cached/replaced/native streams that bypass System.out/System.err. In particular, some direct game DebugLog streams can bypass the tee.
+
+The earliest boundary is the approved JAR's Java main invocation during mod loading. JVM/agent startup, Workshop downloads or trust prompts before that point are outside the mod's capture window. No additional agent, external launcher or trust bypass is installed. If server identity is temporarily unavailable, the worker defers initialization; a later game callback can also start reporting if it was not possible at the Java entry.

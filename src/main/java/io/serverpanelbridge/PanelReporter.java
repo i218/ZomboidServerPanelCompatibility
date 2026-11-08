@@ -15,7 +15,7 @@ public final class PanelReporter implements AutoCloseable {
     private final HttpClient http;
     private final ScheduledExecutorService worker;
     private volatile long lastTick;
-    private volatile boolean closed, registered;
+    private volatile boolean closed, registered, tickSeen;
     public boolean isRegistered() {return registered && !closed;}
     private boolean started;
     private int failures;
@@ -36,7 +36,11 @@ public final class PanelReporter implements AutoCloseable {
             started = true; worker.schedule(this::run, 0, TimeUnit.SECONDS);
         }
     }
-    public void onGameTick() { lastTick = clock.getAsLong(); }
+    public void onGameTick() {onGameTick(clock.getAsLong());}
+    synchronized void onGameTick(long observed) {
+        if(!tickSeen || observed>lastTick)lastTick=observed;
+        tickSeen=true;
+    }
     private void run() {
         if (closed) return;
         long delay = config.heartbeatSeconds;
@@ -58,7 +62,7 @@ public final class PanelReporter implements AutoCloseable {
     void sendOnce() throws Exception {
         long age = clock.getAsLong() - lastTick;
         String payload = Heartbeat.json(config, metrics.cpuPercent(), metrics.memoryMb(), metrics.uptimeSeconds(),
-            age >= 0 && age <= config.staleTickSeconds * 1000L);
+            !tickSeen ? "Starting" : age >= 0 && age <= config.staleTickSeconds * 1000L ? "Healthy" : "Degraded");
         HttpRequest request = HttpRequest.newBuilder(config.heartbeatUri)
             .timeout(Duration.ofSeconds(config.timeoutSeconds))
             .header("Content-Type", "application/json; charset=utf-8")

@@ -10,7 +10,9 @@ if (args.Length != 2) throw new ArgumentException("Arguments: java executable, b
 var registry = new HostRegistry(); // isolated memory only; no user database
 await using var panel = new PanelApiServer(registry, 0);
 var queued = new HashSet<string>();
+var startupHealth = new System.Collections.Concurrent.ConcurrentBag<string>();
 registry.HeartbeatRecorded += (_, e) => {
+    if(e.Host.Id=="pz-integration-test")startupHealth.Add(e.Host.Health);
     lock(queued) {
         if(e.Host.SessionId is null || !queued.Add(e.Host.Id)) return;
         if(e.Host.Id == "pz-integration-test") {
@@ -32,8 +34,9 @@ async Task RunJava(string main,params string[] more) {
 }
 await RunJava("io.serverpanelbridge.PanelSmoke");
 var host=registry.GetHost("pz-integration-test")??throw new InvalidOperationException("No registered host");
-if(host.Name!="Dedicated integration test" || host.Category!="Game servers" || host.Health!="Healthy" || host.Version!="ServerPanelBridge 0.5.1" || host.CpuPercent<0 || host.CpuPercent>100 || host.MemoryMb<=0 || host.SessionId is null)
+if(host.Name!="Dedicated integration test" || host.Category!="Game servers" || host.Health!="Healthy" || host.Version!="ServerPanelBridge 0.6.0" || host.CpuPercent<0 || host.CpuPercent>100 || host.MemoryMb<=0 || host.SessionId is null)
     throw new InvalidOperationException("Unexpected heartbeat values");
+if(!startupHealth.Contains("Starting") || !startupHealth.Contains("Healthy"))throw new InvalidOperationException("Startup health transition missing");
 var history=registry.GetCommandHistory(host.Id);
 if(history.Count!=3 || history.Single(c=>c.Action=="stop").Status!="Acknowledged" || history.Where(c=>c.Action!="stop").Any(c=>c.Status!="Failed"))throw new InvalidOperationException("Unexpected command outcomes");
 if(registry.GetCommandHistory("pz-restart-integration-test").Single().Status!="Acknowledged")throw new InvalidOperationException("Enabled restart not acknowledged");

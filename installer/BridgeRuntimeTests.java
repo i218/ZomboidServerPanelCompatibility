@@ -59,6 +59,10 @@ public final class BridgeRuntimeTests {
             run(source);
             require(Boolean.TRUE.equals(run("return type(started) == 'function' and type(paused) == 'function'")), "Missing unpaused startup/paused callbacks");
             run("started()");
+            Field init=Class.forName("io.serverpanelbridge.Main").getDeclaredField("initialized");init.setAccessible(true);
+            long initDeadline=System.nanoTime()+5_000_000_000L;
+            while(!init.getBoolean(null) && System.nanoTime()<initDeadline)Thread.sleep(10);
+            require(init.getBoolean(null),"Async bootstrap did not finish");
             require(Boolean.TRUE.equals(run("return ServerPanelBridge.requestRestart('SchedulerAlpha', 'probe') == 'REJECTED_UNAVAILABLE' and ServerPanelBridge.restartStatus('SchedulerAlpha', 'probe') == 'UNKNOWN'")), "Lua restart API bypassed disabled local service");
             require(Boolean.TRUE.equals(run("return ServerPanelBridge.isClientOptionalReady()")), "Startup optional mode not confirmed");
             require(advertisedCount()==1, "Native handshake still requires core");

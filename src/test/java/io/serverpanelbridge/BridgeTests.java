@@ -107,6 +107,10 @@ public final class BridgeTests {
                 Files.writeString(configDir.resolve("ServerPanelBridge.properties"), "enabled=false\n");
                 zombie.network.GameServer.server = true;
                 Main.onTick();
+                var initialized=Main.class.getDeclaredField("initialized");initialized.setAccessible(true);
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                while(!initialized.getBoolean(null) && System.nanoTime()<deadline)Thread.sleep(10);
+                check(initialized.getBoolean(null),"async server initialization completed");
                 check(field.get(null) == null, "disabled reporting");
                 check(!zombie.network.GameServer.ServerMods.contains("ServerPanelBridge"), "optional even with reporting disabled");
                 check(Files.exists(configDir.resolve("ServerPanelBridge.properties")), "server config");
@@ -148,6 +152,8 @@ public final class BridgeTests {
         try (PanelReporter reporter = new PanelReporter(new BridgeConfig(values, "http-test"), new JvmMetrics(), clock::get, logger)) {
             test("HTTP heartbeat contract and game tick health", () -> {
                 reporter.sendOnce();
+                check(body.get().contains("\"health\":\"Starting\""),"pre-tick health is Starting");
+                reporter.onGameTick();reporter.sendOnce();
                 check(method.get().equals("POST") && path.get().equals("/api/hosts/pz-http-test/heartbeat"), "request");
                 check(body.get().contains("\"health\":\"Healthy\"") && body.get().contains("\"category\":\"Game servers\""), "payload");
                 clock.addAndGet(21000); reporter.sendOnce();

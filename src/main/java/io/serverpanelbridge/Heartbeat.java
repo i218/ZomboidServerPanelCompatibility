@@ -5,6 +5,9 @@ import java.util.Locale;
 public final class Heartbeat {
     private Heartbeat() { }
     public static String json(BridgeConfig c, double cpu, double memory, long uptime, boolean tickFresh) {
+        return json(c,cpu,memory,uptime,tickFresh?"Healthy":"Degraded");
+    }
+    static String json(BridgeConfig c,double cpu,double memory,long uptime,String health) {
         return "{\"name\":" + quote(c.hostName) +
             ",\"environment\":" + quote(c.environment) +
             ",\"address\":" + quote(c.address) +
@@ -12,8 +15,8 @@ public final class Heartbeat {
             ",\"memoryMb\":" + number(memory, Double.MAX_VALUE) +
             ",\"requestsPerMinute\":0,\"errorRatePercent\":0" +
             ",\"uptimeSeconds\":" + Math.max(0, uptime) +
-            ",\"version\":\"ServerPanelBridge 0.5.1\"" +
-            ",\"health\":" + quote(tickFresh ? "Healthy" : "Degraded") +
+            ",\"version\":\"ServerPanelBridge 0.6.0\"" +
+            ",\"health\":" + quote(health) +
             ",\"category\":" + quote(c.category) + ",\"sessionId\":" + quote(c.sessionId) + "}";
     }
     static String number(double value, double max) {

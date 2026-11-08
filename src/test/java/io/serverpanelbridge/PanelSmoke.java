@@ -12,7 +12,7 @@ public final class PanelSmoke {
         Logger logger=Logger.getAnonymousLogger();
         try(PanelReporter reporter=new PanelReporter(config,new JvmMetrics(),()->System.nanoTime()/1_000_000,logger);
             OutputReporter output=new OutputReporter(config,logger,reporter::isRegistered)){
-            reporter.sendOnce();output.offer("stdout","fixture stdout");output.offer("stderr","fixture stderr");output.offer("log","fixture log");output.sendOnce();
+            reporter.sendOnce();reporter.onGameTick();reporter.sendOnce();output.offer("stdout","fixture stdout");output.offer("stderr","fixture stderr");output.offer("log","fixture log");output.sendOnce();
         }
         AtomicInteger requested=new AtomicInteger(),armed=new AtomicInteger();
         Path directory=Files.createTempDirectory("bridge-panel-command-");
