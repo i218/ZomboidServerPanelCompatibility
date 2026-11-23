@@ -2,7 +2,7 @@
 
 A separate Project Zomboid Build 42 mod that reports dedicated-server health to ServerPanel through ZombieBuddy.
 
-[Русская версия](README.ru.md)
+[Р СѓСЃСЃРєР°СЏ РІРµСЂСЃРёСЏ](README.ru.md)
 
 ## What you get
 
@@ -70,16 +70,16 @@ The cache directory comes from the game, so a custom `-cachedir` is supported. L
 | category | Game servers | Group in ServerPanel |
 | environment | Production | Display label |
 | address | Local dedicated server | Display label, not a connection target |
-| heartbeatSeconds | 5 | Allowed: 5–10 |
-| requestTimeoutSeconds | 2 | Allowed: 1–5 |
-| staleTickSeconds | 20 | Allowed: 10–300 |
+| heartbeatSeconds | 5 | Allowed: 5вЂ“10 |
+| requestTimeoutSeconds | 2 | Allowed: 1вЂ“5 |
+| staleTickSeconds | 20 | Allowed: 10вЂ“300 |
 | maxRetrySeconds | 30 | Maximum retry delay |
 | outputEnabled | true | Send bridge events to the panel Output tab |
 | captureConsoleOutput | false | Also tee Java stdout/stderr; may contain private data |
 
 A copy of the defaults is in [config/ServerPanelBridge.properties](config/ServerPanelBridge.properties). The runtime file is created automatically; the copy in the mod directory is a reference, not the active configuration. On server startup, missing settings are added to the runtime file automatically, preserving your existing settings.
 
-With the default console capture disabled, reporting does not read player lists, chat, INI contents or other mods' log files. Console capture is opt-in and does not redact player data or secrets. Optional JVM overrides: `-Dserverpanelbridge.config=<absolute file>` and `-Dserverpanelbridge.cachedir=<absolute directory>`.
+With the default console capture disabled, reporting does not read player lists, chat or other mods' log files. Preload reads the selected server INI only to verify that Bridge is enabled. Console capture is opt-in and does not redact player data or secrets. Optional JVM overrides: `-Dserverpanelbridge.config=<absolute file>` and `-Dserverpanelbridge.cachedir=<absolute directory>`.
 
 ## Try it
 
@@ -181,7 +181,7 @@ stopWhenPlayersOnline=false
 
 Fully restart the server after updating/editing the config, then use Restart in ServerPanel. restartEnabled defaults to false and is independent of stopEnabled. Both actions share the player policy: a nonempty server refuses shutdown unless stopWhenPlayersOnline=true. No countdown or player announcement is implemented.
 
-The worker first captures the current Java executable, original arguments, working directory and process identity, and starts a separate lightweight helper JVM from the bundled JAR. Once ready, the game thread requests normal QueueQuit and arms the helper with a one-byte pipe message. The helper waits for that exact process to exit, then launches one replacement JVM. If it fails to exit within restartExitTimeoutSeconds (10–600), restart is cancelled; the helper never kills it. Preparation/lease/player-policy failures leave the server running and cancel the helper.
+The worker first captures the current Java executable, original arguments, working directory and process identity, and starts a separate lightweight helper JVM from the bundled JAR. Once ready, the game thread requests normal QueueQuit and arms the helper with a one-byte pipe message. The helper waits for that exact process to exit, then launches one replacement JVM. If it fails to exit within restartExitTimeoutSeconds (10вЂ“600), restart is cancelled; the helper never kills it. Preparation/lease/player-policy failures leave the server running and cancel the helper.
 
 Original launch parameters are passed through a private pipe, not written to scripts or journals. Windows uses a fixed, bounded PowerShell/CIM query because ProcessHandle omits arguments there; parsing follows [Microsoft's Windows argument rules](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments?view=msvc-170). Java exposes process metadata as optional values ([Java API](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/lang/ProcessHandle.Info.html)); unavailable metadata causes refusal before shutdown. A direct Java launch with zombie.network.GameServer is required. Argument files (`@...`) and literal double quotes inside decoded arguments are refused, because they cannot safely be replayed by this implementation. Spaces, Unicode paths and trailing backslashes were tested.
 
@@ -223,7 +223,7 @@ Native regression test, using installed RakNet and Java with temporary ports and
 
 The same fixture reproduced retained ports with the 0.3.1 code and successfully rebound both ports in the replacement with 0.3.2. This validates native socket transfer and process relaunch, not a full production world startup. Windows builds embed the launcher using the built-in .NET Framework C# compiler; builds on other platforms use the existing direct Java helper path.
 
-## ServerPanel 1.12–1.13 compatibility (0.4.0)
+## ServerPanel 1.12вЂ“1.13 compatibility (0.4.0)
 
 Each JVM creates one random sessionId and sends it in every heartbeat, command poll, ACK and output batch. It changes after a server restart and is never stored in configuration. Stop/Restart from a different targetSessionId are ignored before preparing a helper or reserving a command. Both expiresAtUtc and leaseExpiresAtUtc are checked before execution, including on the game tick. An action begun on time can still ACK after its command TTL, as long as its original lease is valid. Older command responses without the new optional fields retain the existing lease checks. Sessions prevent stale commands; they are not authentication.
 
@@ -274,4 +274,21 @@ Before the first server callback, health is Starting. After the callback, normal
 
 To see Java console text during loading, keep outputEnabled=true and explicitly set captureConsoleOutput=true in the active runtime config, then fully restart. With console capture disabled, only Bridge events are sent earlier. Existing privacy, queue, truncation and best-effort delivery limits still apply: this does not import old files or capture writes through cached/replaced/native streams that bypass System.out/System.err. In particular, some direct game DebugLog streams can bypass the tee.
 
-The earliest boundary is the approved JAR's Java main invocation during mod loading. JVM/agent startup, Workshop downloads or trust prompts before that point are outside the mod's capture window. No additional agent, external launcher or trust bypass is installed. If server identity is temporarily unavailable, the worker defers initialization; a later game callback can also start reporting if it was not possible at the Java entry.
+Without preload, the earliest boundary remains the approved JAR's Java main invocation during mod loading. Version 0.7.0 adds the earlier preload path described below. No additional agent, external launcher or trust bypass is installed. If server identity is temporarily unavailable, the worker defers initialization; a later game callback can also start reporting if it was not possible at the Java entry.
+
+## Workshop-phase output (0.7.0)
+
+The same installer registers the bundled JAR for ZombieBuddy **PREMAIN**, before the dedicated server starts Workshop downloads. No additional agent or launcher is installed. ZombieBuddy's existing trust policy still applies; the JAR remains unsigned.
+
+1. Stop the dedicated server and run the new installer.
+2. Check the **ZombieBuddy settings folder**: normally `<server account home>/.zombie_buddy`, independently of the game cachedir. If the agent uses `config_dir=...`, select that directory. The silent installer accepts `--zombie-buddy-dir "D:/ZombieBuddySettings"`.
+3. In the active server's config, set `outputEnabled=true` and `captureConsoleOutput=true`. Capture remains **off by default** because raw console logs can contain private data.
+4. Fully restart the server JVM. Open the host's **Output** tab during startup; health remains **Starting** until a game callback.
+
+The installer updates Bridge's `preload_mods` entry in the selected folder's `config.json`, preserving other logical settings, trust settings and other preload entries. The backup is included in the cachedir's installer-backups folder. Client-only setup does not change agent settings. It never changes approvals or approves the mod for you.
+
+Before profile/config validation, up to 500 console records of 4,000 UTF-16 characters each are buffered only in memory, without sending or writing them to disk. Inactive profiles and disabled capture discard the buffer. Normal loading adopts the same reporter, session and console wrapper. Stop/Restart still wait for normal game callbacks.
+
+Early identity detection supports the stock `zombie.network.GameServer` command line. Indirect launchers, argument files, co-op/hosted launches, unknown game flags or unavailable arguments retain the normal later bootstrap. The profile INI must enable ServerPanelBridge. Captured Java output includes streams cached after the tee was installed; native C/C++ writes, output before PREMAIN and streams bypassing the wrapper remain outside coverage. This is not a complete Steam progress API.
+
+See [VERIFICATION.md](VERIFICATION.md) for the isolated real-loader check. Workshop downloads during a real server startup still require deployment verification.

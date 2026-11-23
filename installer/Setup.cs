@@ -8,7 +8,8 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Windows.Forms;
 using System.Drawing;
-[assembly: AssemblyVersion("0.6.0.0")]
+using System.Web.Script.Serialization;
+[assembly: AssemblyVersion("0.7.0.0")]
 [assembly: AssemblyTitle("ServerPanelBridge Setup")]
 public class Setup {
     const string Id="ServerPanelBridge";
@@ -21,13 +22,13 @@ public class Setup {
             for(int i=0;i<args.Length;i++) {
                 if(args[i]=="--silent") continue;
                 string key=args[i];
-                if(key!="--data-dir" && key!="--server-name" && key!="--mode") throw new Exception("Unknown option: "+key);
+                if(key!="--data-dir" && key!="--server-name" && key!="--mode" && key!="--zombie-buddy-dir") throw new Exception("Unknown option: "+key);
                 if(++i==args.Length) throw new Exception("Missing option value");
                 options.Add(key,args[i]);
             }
             string mode=Get(options,"--mode","server");
             if(mode!="server" && mode!="client" && mode!="both") throw new Exception("Invalid mode");
-            Install(Get(options,"--data-dir",DefaultDir),Get(options,"--server-name","servertest"),mode!="client",mode!="server");
+            Install(Get(options,"--data-dir",DefaultDir),Get(options,"--server-name","servertest"),mode!="client",mode!="server",Get(options,"--zombie-buddy-dir",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".zombie_buddy")));
             return 0;
         } catch(Exception error) {
             string log=Path.Combine(Path.GetTempPath(),Id+"-setup-error-"+Guid.NewGuid().ToString("N")+".txt");
@@ -96,7 +97,22 @@ public class Setup {
             throw new IOException("Не удалось записать файл: "+path+"\\n"+error.Message,error);
         } finally { if(File.Exists(temp)) File.Delete(temp); }
     }
-    public static void Install(string dataDir,string serverName,bool server,bool client) {
+    public static string EnablePreload(string json,string info,string jar) {
+        var codec=new JavaScriptSerializer();codec.MaxJsonLength=1024*1024;
+        Dictionary<string,object> root;
+        if(String.IsNullOrWhiteSpace(json))root=new Dictionary<string,object>{{"trusted_authors",new object[0]},{"auto_fix_mod_order",true},{"fix_approval_dialog_cursor",true}};
+        else {root=codec.DeserializeObject(json) as Dictionary<string,object>;if(root==null)throw new IOException("ZombieBuddy config.json must contain a JSON object");}
+        object value;Dictionary<string,object> mods;
+        if(!root.TryGetValue("preload_mods",out value) || value==null)mods=new Dictionary<string,object>();
+        else {mods=value as Dictionary<string,object>;if(mods==null)throw new IOException("Invalid ZombieBuddy preload_mods");}
+        Dictionary<string,object> own=new Dictionary<string,object>();
+        if(mods.TryGetValue(Id,out value) && value is Dictionary<string,object>)own=(Dictionary<string,object>)value;
+        own["infPath"]=info;own["jarPath"]=jar;mods[Id]=own;root["preload_mods"]=mods;
+        return codec.Serialize(root)+"\n";
+    }
+    // Legacy in-process entry retained for embedding/tests. CLI/GUI supply the agent directory.
+    public static void Install(string dataDir,string serverName,bool server,bool client) {Install(dataDir,serverName,server,client,null);}
+    public static void Install(string dataDir,string serverName,bool server,bool client,string zombieBuddyDir) {
         if(!server && !client) throw new Exception("Выберите установку для сервера или клиента.");
         if(String.IsNullOrWhiteSpace(dataDir) || !Path.IsPathRooted(dataDir)) throw new Exception("Укажите полный путь cachedir.");
         dataDir=Path.GetFullPath(dataDir).TrimEnd('\\','/');
@@ -153,16 +169,24 @@ public class Setup {
                 if(!File.Exists(config)) writes.Add(config,writes[Path.Combine(target,"config",Id+".properties")]);
             }
         }
+        string zbConfig=null,zbRoot=null;
+        if(server && zombieBuddyDir!=null) {
+            if(!Path.IsPathRooted(zombieBuddyDir))throw new IOException("Укажите полный путь папки конфигурации ZombieBuddy");
+            zbRoot=Path.GetFullPath(zombieBuddyDir).TrimEnd('\\','/');if(zbRoot.Length<=3)throw new IOException("Корень диска не подходит для ZombieBuddy");
+            zbConfig=Path.Combine(zbRoot,"config.json");SafePath(zbConfig,zbRoot);
+            byte[] old=File.Exists(zbConfig)?File.ReadAllBytes(zbConfig):null;
+            writes.Add(zbConfig,Encode(EnablePreload(old==null?"":Decode(old),Path.Combine(target,"42","mod.info"),Path.Combine(target,"42","media","java",Id+".jar")),old));
+        }
         var originals=new Dictionary<string,byte[]>(); var changed=new List<string>();
         string backup=Path.Combine(dataDir,Id+"-installer-backups",Guid.NewGuid().ToString("N"));
         SafePath(backup,dataDir);
         // Validate and back up every destination before the first replacement.
         foreach(var write in writes) {
-            SafePath(write.Key,dataDir);
+            SafePath(write.Key,write.Key==zbConfig?zbRoot:dataDir);
             byte[] original=File.Exists(write.Key)?File.ReadAllBytes(write.Key):null;
             originals.Add(write.Key,original);
             if(original!=null) {
-                string saved=Path.Combine(backup,write.Key.Substring(dataDir.Length+1));
+                string saved=write.Key==zbConfig?Path.Combine(backup,"ZombieBuddy","config.json"):Path.Combine(backup,write.Key.Substring(dataDir.Length+1));
                 Directory.CreateDirectory(Path.GetDirectoryName(saved)); File.WriteAllBytes(saved,original);
             }
         }
@@ -184,10 +208,10 @@ public class Setup {
         }
     }
     class InstallForm:Form {
-        TextBox path=new TextBox(); ComboBox name=new ComboBox();
+        TextBox path=new TextBox(), zbPath=new TextBox(); ComboBox name=new ComboBox();
         CheckBox server=new CheckBox(), client=new CheckBox();
         public InstallForm() {
-            Text="ServerPanelBridge 0.6.0 — установка"; ClientSize=new Size(580,270); FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;
+            Text="ServerPanelBridge 0.7.0 — установка"; ClientSize=new Size(580,365); FormBorderStyle=FormBorderStyle.FixedDialog; MaximizeBox=false;
             var label=new Label { Text="Папка данных Zomboid (cachedir), не папка игры:",AutoSize=true,Location=new Point(15,15) }; Controls.Add(label);
             path.Text=DefaultDir; path.SetBounds(15,40,450,25); Controls.Add(path);
             var browse=new Button {Text="Обзор",Location=new Point(475,40)}; Controls.Add(browse);
@@ -196,10 +220,15 @@ public class Setup {
             name.SetBounds(280,80,280,25); name.Text="servertest"; Controls.Add(name);
             path.TextChanged+=(s,e)=>RefreshServers(); RefreshServers();
             client.Text="Также включить в клиентском списке модов (необязательно)"; client.SetBounds(15,115,550,25); Controls.Add(client);
-            var note=new Label {Text="JAR встроен. Настройки сохраняются. Игра и сервер должны быть закрыты.\nНужен установленный ZombieBuddy Java agent; доверие JAR — через ZombieBuddy.\nServerPanel устанавливается отдельно. Клиентам подключаемой игры мод не нужен.",Location=new Point(15,150),Size=new Size(550,60)}; Controls.Add(note);
-            var install=new Button {Text="Установить",Location=new Point(425,225),Size=new Size(135,30)}; Controls.Add(install);
+            Controls.Add(new Label{Text="Настройки ZombieBuddy (папка config.json):",AutoSize=true,Location=new Point(15,150)});
+            zbPath.Text=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".zombie_buddy");zbPath.SetBounds(15,175,450,25);Controls.Add(zbPath);
+            var zbBrowse=new Button{Text="Обзор",Location=new Point(475,175)};Controls.Add(zbBrowse);
+            zbBrowse.Click+=(s,e)=>{using(var dialog=new FolderBrowserDialog())if(dialog.ShowDialog()==DialogResult.OK)zbPath.Text=dialog.SelectedPath;};
+            server.CheckedChanged+=(s,e)=>{zbPath.Enabled=zbBrowse.Enabled=server.Checked;};
+            var note=new Label {Text="JAR встроен. Настройки сохраняются. Игра и сервер должны быть закрыты.\nНужен установленный ZombieBuddy Java agent; доверие JAR — через ZombieBuddy.\nServerPanel устанавливается отдельно. Клиентам подключаемой игры мод не нужен.",Location=new Point(15,215),Size=new Size(550,90)}; Controls.Add(note);
+            var install=new Button {Text="Установить",Location=new Point(425,320),Size=new Size(135,30)}; Controls.Add(install);
             install.Click+=(s,e)=>{try {
-                Install(path.Text,name.Text,server.Checked,client.Checked);
+                Install(path.Text,name.Text,server.Checked,client.Checked,zbPath.Text);
                 MessageBox.Show("Установлено. JAR распакован и проверен.\nЗапустите сервер заново; подтвердите доверие JAR в ZombieBuddy при необходимости.","ServerPanelBridge");
             } catch(Exception error) {MessageBox.Show(error.Message,"Ошибка установки");}};
         }

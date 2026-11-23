@@ -42,7 +42,8 @@ public final class OutputReporter implements AutoCloseable {
     public synchronized void start() {
         if(started || closed || !config.enabled || !config.outputEnabled) return;
         started=true;logger.addHandler(handler);
-        if(config.captureConsoleOutput) console=new ConsoleCapture(this::offer);
+        if(config.captureConsoleOutput) {console=PreloadConsole.claim(this::offer);if(console==null)console=new ConsoleCapture(this::offer);}
+        else PreloadConsole.discard();
         worker.scheduleWithFixedDelay(this::cycle,1,1,TimeUnit.SECONDS);
     }
     public void offer(String stream,String text) {
@@ -80,6 +81,6 @@ public final class OutputReporter implements AutoCloseable {
     @Override public synchronized void close(){
         if(closed)return;
         logger.removeHandler(handler);if(console!=null)console.close();
-        closed=true;worker.shutdownNow();queue.clear();
+        closed=true;PreloadConsole.discard();worker.shutdownNow();queue.clear();
     }
 }

@@ -15,7 +15,7 @@ public final class Heartbeat {
             ",\"memoryMb\":" + number(memory, Double.MAX_VALUE) +
             ",\"requestsPerMinute\":0,\"errorRatePercent\":0" +
             ",\"uptimeSeconds\":" + Math.max(0, uptime) +
-            ",\"version\":\"ServerPanelBridge 0.6.0\"" +
+            ",\"version\":\"ServerPanelBridge 0.7.0\"" +
             ",\"health\":" + quote(health) +
             ",\"category\":" + quote(c.category) + ",\"sessionId\":" + quote(c.sessionId) + "}";
     }

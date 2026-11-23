@@ -15,7 +15,7 @@ final class ConsoleCapture implements AutoCloseable {
     }
     private static final class Tap extends OutputStream {
         final PrintStream original;final String stream;final BiConsumer<String,String> sink;final Charset charset;
-        final ByteArrayOutputStream line=new ByteArrayOutputStream();boolean carriage;
+        final ByteArrayOutputStream line=new ByteArrayOutputStream();boolean carriage;boolean active=true;
         Tap(PrintStream original,String stream,BiConsumer<String,String> sink){
             this.original=original;this.stream=stream;this.sink=sink;
             Charset detected=Charset.defaultCharset();
@@ -25,6 +25,7 @@ final class ConsoleCapture implements AutoCloseable {
         public synchronized void write(int value){byte[] one={(byte)value};write(one,0,1);}
         public synchronized void write(byte[] bytes,int offset,int count){
             original.write(bytes,offset,count);
+            if(!active)return;
             for(int i=offset;i<offset+count;i++) {
                 int value=bytes[i]&255;
                 if(value==10){if(!carriage)emit();carriage=false;}
@@ -33,7 +34,7 @@ final class ConsoleCapture implements AutoCloseable {
             }
         }
         private void emit(){String value=new String(line.toByteArray(),charset);line.reset();sink.accept(stream,value);}
-        synchronized void finish(){if(line.size()>0)emit();}
+        synchronized void finish(){if(active && line.size()>0)emit();active=false;line.reset();}
         public void flush(){original.flush();}
         public void close(){flush();} // Never close the game's original stream.
     }

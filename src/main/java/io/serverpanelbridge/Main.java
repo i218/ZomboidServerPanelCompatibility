@@ -7,6 +7,7 @@ import java.util.concurrent.*;
 public final class Main {
     private static final Logger LOG = Logger.getLogger("ServerPanelBridge");
     private static boolean registered, failedGuard, bootstrapStarted, controlsInitialized;
+    private static volatile boolean normalEntry;
     private static volatile boolean initialized;
     private static volatile BridgeConfig runtimeConfig;
     private static volatile Path runtimeDirectory;
@@ -20,7 +21,7 @@ public final class Main {
     private static OutputReporter output;
     private Main() { }
     public static synchronized void main(String[] args) {
-        startEarlyReporting();
+        normalEntry=true;startEarlyReporting();
         if (registered) return;
         try {
             Class<?> exposer = Class.forName("me.zed_0xff.zombie_buddy.Exposer");
@@ -31,13 +32,20 @@ public final class Main {
     }
     /** No client writes/network; initialization itself runs outside the loader/game thread. */
     private static synchronized void startEarlyReporting() {
-        if(bootstrapStarted)return;
+        if(bootstrapStarted || PreMain.pending())return;
         try {if(!PzRuntime.isDedicatedServer())return;}
         catch(ReflectiveOperationException | RuntimeException unavailable){return;}
         bootstrapStarted=true;
         bootstrap=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ServerPanelBridge-Bootstrap");t.setDaemon(true);return t;});
         bootstrap.scheduleWithFixedDelay(Main::bootstrapAttempt,0,250,TimeUnit.MILLISECONDS);
     }
+    static synchronized void startPreloadedReporting(StartupContext context) {
+        if(bootstrapStarted)return;
+        bootstrapStarted=true;
+        bootstrap=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ServerPanelBridge-Bootstrap");t.setDaemon(true);return t;});
+        bootstrap.execute(()->initializeReporting(context.serverName,context.config));
+    }
+    static void resumeNormalBootstrap(){if(normalEntry)startEarlyReporting();}
     private static void bootstrapAttempt() {
         String serverName;Path file;
         try {
@@ -45,13 +53,20 @@ public final class Main {
             serverName=PzRuntime.serverName();
             Path defaultFile=PzRuntime.cacheDirectory().resolve("ServerPanelBridge").resolve(serverName).resolve("ServerPanelBridge.properties");
             file=Paths.get(System.getProperty("serverpanelbridge.config",defaultFile.toString())).toAbsolutePath();
-        } catch(ReflectiveOperationException | RuntimeException unavailable) {
+            if(PreMain.invoked() && !StartupContext.enabledInProfile(PzRuntime.cacheDirectory(),serverName)) {
+                PreloadConsole.discard();initialized=true;bootstrap.shutdown();return;
+            }
+        } catch(java.io.IOException | ReflectiveOperationException | RuntimeException unavailable) {
             if(!readinessLogged){LOG.info("Early reporting waiting for dedicated-server name/cache directory");readinessLogged=true;}
             return;
         }
+        initializeReporting(serverName,file);
+    }
+    private static void initializeReporting(String serverName,Path file) {
         FileHandler handler=null;
         try {
             BridgeConfig config=BridgeConfig.load(file,serverName);
+            if(!config.enabled || !config.outputEnabled || !config.captureConsoleOutput)PreloadConsole.discard();
             Files.createDirectories(file.getParent());
             handler=new FileHandler(file.getParent().resolve("ServerPanelBridge-%g.log").toString(),1024*1024,3,true);
             handler.setEncoding("UTF-8");handler.setFormatter(new SimpleFormatter());LOG.addHandler(handler);
@@ -70,7 +85,7 @@ public final class Main {
             runtimeDirectory=file.getParent();runtimeConfig=config;
             LOG.info("Early monitoring "+(config.enabled?"enabled":"disabled")+"; waiting for first server callback before controls; hostId="+config.hostId);
         } catch(Exception error) {
-            if(output!=null)output.close();if(reporter!=null)reporter.close();
+            PreloadConsole.discard();if(output!=null)output.close();if(reporter!=null)reporter.close();
             if(handler!=null){handler.close();LOG.removeHandler(handler);}
             LOG.log(Level.SEVERE,"Early reporting initialization failed; retry requires server restart",error);
         } finally {initialized=true;bootstrap.shutdown();}

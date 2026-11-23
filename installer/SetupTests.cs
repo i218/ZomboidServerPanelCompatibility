@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Security.Cryptography;
@@ -61,6 +62,31 @@ class SetupTests {
             Setup.Install(both,"test1",true,false);
             Check(first==BitConverter.ToString(hash.ComputeHash(File.ReadAllBytes(jar))),"repeat JAR integrity");
         }
+        string pre=Path.Combine(root,"preload data Ж"),agent=Path.Combine(root,"agent-settings");
+        Directory.CreateDirectory(Path.Combine(pre,"Server"));Directory.CreateDirectory(agent);
+        string preIni=Path.Combine(pre,"Server","pre.ini"),agentJson=Path.Combine(agent,"config.json"),approvals=Path.Combine(agent,"mod_approvals.json");
+        File.WriteAllText(preIni,"Mods=Other\n");
+        File.WriteAllText(agentJson,"{\"trusted_authors\":[\"123\"],\"auto_fix_mod_order\":false,\"fix_approval_dialog_cursor\":false,\"extra\":{\"keep\":42},\"preload_mods\":{\"OtherPreload\":{\"infPath\":\"other.info\",\"jarPath\":\"other.jar\"},\"ServerPanelBridge\":{\"note\":\"keep\"}}}",new UTF8Encoding(true));
+        File.WriteAllText(approvals,"fixture-approval-content");
+        Setup.Install(pre,"pre",true,false,agent);
+        var codec=new System.Web.Script.Serialization.JavaScriptSerializer();
+        var agentRoot=(Dictionary<string,object>)codec.DeserializeObject(File.ReadAllText(agentJson));
+        var mods=(Dictionary<string,object>)agentRoot["preload_mods"];var own=(Dictionary<string,object>)mods["ServerPanelBridge"];
+        Check(mods.ContainsKey("OtherPreload") && (string)own["infPath"]==Path.Combine(pre,"mods","ServerPanelBridge","42","mod.info") && (string)own["jarPath"]==Path.Combine(pre,"mods","ServerPanelBridge","42","media","java","ServerPanelBridge.jar"),"preload registration uses deployed info/JAR and preserves other mods");
+        Check((bool)agentRoot["auto_fix_mod_order"]==false && (bool)agentRoot["fix_approval_dialog_cursor"]==false && (string)own["note"]=="keep" && (int)((Dictionary<string,object>)agentRoot["extra"])["keep"]==42,"agent settings and unknown fields preserved");
+        Check(File.ReadAllText(approvals)=="fixture-approval-content" && ((object[])agentRoot["trusted_authors"])[0].Equals("123"),"trust authors and approval file untouched");
+        byte[] agentBytes=File.ReadAllBytes(agentJson);Check(agentBytes[0]==239 && agentBytes[1]==187 && agentBytes[2]==191,"agent config BOM preserved");
+        Setup.Install(pre,"pre",true,false,agent);Check(BitConverter.ToString(agentBytes)==BitConverter.ToString(File.ReadAllBytes(agentJson)),"repeat preload registration is idempotent");
+        string savedPre=File.ReadAllText(preIni);File.WriteAllText(agentJson,"invalid-json");
+        Fails(()=>Setup.Install(pre,"pre",true,false,agent));Check(File.ReadAllText(preIni)==savedPre && File.ReadAllText(agentJson)=="invalid-json","malformed agent JSON leaves all destinations unchanged");
+        File.WriteAllBytes(agentJson,agentBytes);File.WriteAllText(preIni,"Mods=Other\n");string originalPre=File.ReadAllText(preIni);
+        using(var locked=new FileStream(agentJson,FileMode.Open,FileAccess.Read,FileShare.Read))Fails(()=>Setup.Install(pre,"pre",true,false,agent));
+        Check(File.ReadAllText(preIni)==originalPre && BitConverter.ToString(File.ReadAllBytes(agentJson))==BitConverter.ToString(agentBytes),"late locked agent config rolls back server changes");
+        Check(Directory.GetFiles(Path.Combine(pre,"ServerPanelBridge-installer-backups"),"config.json",SearchOption.AllDirectories).Length>0,"agent config backup stays in selected data-directory backups");
+        var freshAgent=(Dictionary<string,object>)codec.DeserializeObject(Setup.EnablePreload("","info","jar"));
+        Check((bool)freshAgent["auto_fix_mod_order"] && (bool)freshAgent["fix_approval_dialog_cursor"] && ((object[])freshAgent["trusted_authors"]).Length==0,"new agent config retains installed ZombieBuddy defaults");
+        string clientAgent=Path.Combine(root,"client-agent-unused");Setup.Install(client,"",false,true,clientAgent);
+        Check(!Directory.Exists(clientAgent),"client-only installation never registers agent preload");
         Console.WriteLine("RESULT: "+passed+" passed, 0 failed. Fixtures: "+root);
     }
 }

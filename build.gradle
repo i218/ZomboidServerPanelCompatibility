@@ -1,7 +1,7 @@
 plugins { id 'java' }
 
 group = 'io.serverpanelbridge'
-version = '0.6.0'
+version = '0.7.0'
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
 tasks.withType(JavaCompile).configureEach {
     options.release = 11
@@ -11,7 +11,7 @@ tasks.named('jar') {
     archiveFileName = 'ServerPanelBridge.jar'
     preserveFileTimestamps = false
     reproducibleFileOrder = true
-    manifest { attributes 'Implementation-Title': 'ServerPanelBridge', 'Implementation-Version': project.version }
+    manifest { attributes 'Implementation-Title': 'ServerPanelBridge', 'Implementation-Version': project.version, 'ZB-Preload': 'true' }
 }
 tasks.register('selfTest', JavaExec) {
     dependsOn testClasses
@@ -103,3 +103,11 @@ tasks.register('earlyStartupTest', JavaExec) {
     mainClass = 'io.serverpanelbridge.EarlyStartupTests'
 }
 tasks.named('check') { dependsOn earlyStartupTest }
+
+tasks.register('preloadTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.serverpanelbridge.PreloadTests'
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+tasks.named('check') { dependsOn preloadTest }

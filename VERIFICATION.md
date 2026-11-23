@@ -99,3 +99,23 @@ PASS: 31 Sentinel behavioral tests and installer integration; Bridge 29 control 
 Four isolated JVM modes exercise Main.main before any game callback: client (no reporting worker/files/HTTP), early dedicated entry (Starting heartbeat and captured console marker arrive before callbacks, controls unavailable), initially missing identity (deferral without guessed host registration, then successful startup), and simulated Lua exposer failure (reporting continues, controls remain unavailable). Repeated entry/callback calls retain one reporter/capture. The first callback activates controls without an actual shutdown and advances subsequent heartbeat health to Healthy. Tests use temporary loopback listeners/configs and simulated game-state fields; no real dedicated world is launched. Existing health tests now assert Starting before the first observed callback and Healthy/Degraded afterwards.
 
 Installed game bytecode sets GameServer.server at the start of GameServer.main, parses serverName before loadMods, and ZombieBuddy's Loader invokes a mod's main during its MAIN phase. These are inspected local library facts; the actual mod-load timing and full log coverage on the remote dedicated remain deployment checks. Cached DebugLog streams that bypass System.out/System.err are not hooked.
+
+## 0.7.0 ZombieBuddy preload
+
+Inspected the installed ZombieBuddy Loader/Agent/Config bytecode: config_dir defaults to user.home/.zombie_buddy; preload_mods entries contain infPath/jarPath; ZB-Preload enables the PREMAIN callback PreMain.premain(String[]). Existing approval/signature policy is retained. No production javaagent was added.
+
+Ten preload parsing/capture assertions cover JVM operands, password operands, the independent cache prepass (including later cachedir operands), defaults, unsupported launch refusal, inactive profile/BOM, partial lines, cached/replaced streams, passthrough after close, bounded overflow and capture opt-out. Installer regressions cover registration, preserved unknown/trust/other-mod values, BOM, repeated setup, malformed JSON refusal, locked-file rollback/backup, fresh defaults and client-only isolation.
+
+The native-loader harness invokes the installed ZombieBuddy Loader.preloadMods and later MAIN loadJar with real Instrumentation in a disposable test JVM. It uses temporary config_dir/cache/config/INI, a simulated dedicated entry and a loopback HTTP listener on a dynamic port. It does not launch a world, authenticate Steam, change installed mods or touch real agent configuration. The test-only agent is not packaged in the production mod.
+
+Five passing modes: active (buffered Workshop-phase markers reach Output before ordinary mod loading, same reporter after MAIN, cached-stream marker delivered once, controls unavailable); no-capture (no buffered console forwarding); inactive profile (no heartbeat); unsupported-argument fallback (normal MAIN still reports); client (no reporting). Fixture arguments include a private marker whose absence from Output is asserted.
+
+After building, reproduce on Windows with JDK 11 JAVA_HOME and the installed game's bundled runtime:
+
+```powershell
+.\installer\test-preload-runtime.ps1 -GameDirectory "<ProjectZomboid directory>" -ZombieBuddyJar "<ZombieBuddy.jar path>"
+```
+
+The Windows fixture needs permission to read its own child process command line through CIM. Full Workshop downloads, remote deployment, approval UI and client joining remain live checks; the fixture proves loader handoff and forwarding, not complete native Steam log coverage.
+
+The native Lua/handshake fixture uses a disposable unsigned fixture copy of projectzomboid.jar so unsigned test stubs can share signed game packages. The installed JAR and its signatures remain untouched; this test does not validate game-JAR signing.
